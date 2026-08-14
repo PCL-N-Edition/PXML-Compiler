@@ -1,5 +1,8 @@
 #include <immintrin.h>
 #include <stddef.h>
+#if defined(_MSC_VER)
+#include <intrin.h>
+#endif
 
 size_t pxml_scan_byte_avx2(const char *source, size_t length, unsigned char value)
 {
