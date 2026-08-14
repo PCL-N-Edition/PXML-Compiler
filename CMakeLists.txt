@@ -16,8 +16,10 @@ function(pxml_configure_target target)
             $<INSTALL_INTERFACE:include>
         PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}/src)
-    if(MSVC)
+    if(WIN32)
         target_compile_definitions(${target} PRIVATE _CRT_SECURE_NO_WARNINGS)
+    endif()
+    if(MSVC)
         target_compile_options(${target} PRIVATE /W4 /permissive- /utf-8)
         if(PXML_WARNINGS_AS_ERRORS)
             target_compile_options(${target} PRIVATE /WX)
