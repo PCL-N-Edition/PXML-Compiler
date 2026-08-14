@@ -1,0 +1,287 @@
+name: PGO release matrix
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing GitHub Release tag to populate
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pxml-release-${{ github.event.release.tag_name || inputs.tag }}
+  cancel-in-progress: false
+
+env:
+  RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+
+jobs:
+  build:
+    name: PGO / ${{ matrix.target }} / ${{ matrix.toolchain }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: windows-x86_64
+            runner: windows-2025
+            toolchain: LLVM Clang
+            compiler: clang
+            profdata: llvm-profdata
+            lld_arg: --use-lld
+          - target: windows-arm64
+            runner: windows-11-arm
+            toolchain: LLVM Clang
+            compiler: clang
+            profdata: llvm-profdata
+            lld_arg: --use-lld
+          - target: linux-x86_64
+            runner: ubuntu-24.04
+            toolchain: LLVM Clang
+            compiler: clang-18
+            profdata: llvm-profdata-18
+            lld_arg: --use-lld
+          - target: linux-arm64
+            runner: ubuntu-24.04-arm
+            toolchain: LLVM Clang
+            compiler: clang-18
+            profdata: llvm-profdata-18
+            lld_arg: --use-lld
+          - target: macos-x86_64
+            runner: macos-15-intel
+            toolchain: Apple Clang
+            compiler: clang
+            profdata: llvm-profdata
+            lld_arg: ""
+          - target: macos-arm64
+            runner: macos-15
+            toolchain: Apple Clang
+            compiler: clang
+            profdata: llvm-profdata
+            lld_arg: ""
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          fetch-depth: 0
+
+      - name: Install LLVM tools (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-18 lld-18 ninja-build
+
+      - name: Resolve native toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$RUNNER_OS" == "macOS" ]]; then
+            echo "PXML_PROFDATA=$(xcrun --find llvm-profdata)" >> "$GITHUB_ENV"
+          else
+            command -v "${{ matrix.profdata }}"
+            echo "PXML_PROFDATA=${{ matrix.profdata }}" >> "$GITHUB_ENV"
+          fi
+          "${{ matrix.compiler }}" --version
+          cmake --version
+          ninja --version
+          echo "SOURCE_DATE_EPOCH=$(git show -s --format=%ct "$RELEASE_TAG")" >> "$GITHUB_ENV"
+
+      - name: Train PGO and build optimized compiler
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/build_pgo.py \
+            --source . \
+            --work "build/pgo-${{ matrix.target }}" \
+            --install "release-stage/${{ matrix.target }}" \
+            --compiler "${{ matrix.compiler }}" \
+            --profdata "$PXML_PROFDATA" \
+            --training-rounds 16 \
+            ${{ matrix.lld_arg }}
+
+      - name: Package target
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/package_release.py \
+            --install "release-stage/${{ matrix.target }}" \
+            --output release-output/dist \
+            --target "${{ matrix.target }}" \
+            --compiler "${{ matrix.compiler }}"
+
+      - name: Upload target artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.target }}
+          path: release-output/**
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish assets and verified binary diffs
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          fetch-depth: 0
+
+      - name: Download all native targets
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: release-output
+          merge-multiple: true
+
+      - name: Validate release matrix
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected=(
+            windows-x86_64 windows-arm64
+            linux-x86_64 linux-arm64
+            macos-x86_64 macos-arm64
+          )
+          for target in "${expected[@]}"; do
+            if [[ "$target" == windows-* ]]; then extension=.zip; else extension=.tar.gz; fi
+            test -s "release-output/dist/pxml-${target}${extension}"
+            test -s "release-output/dist/pxml-${target}.build.json"
+            suffix=""
+            [[ "$target" == windows-* ]] && suffix=.exe
+            for tool in pxml-expand pxml-opt pxml-compile pxmlc; do
+              test -s "release-output/diff-input/${target}/${tool}${suffix}"
+            done
+          done
+
+      - name: Locate previous release
+        id: previous
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          previous=""
+          while IFS= read -r candidate; do
+            if [[ -n "$candidate" && "$candidate" != "$RELEASE_TAG" ]]; then
+              previous="$candidate"
+              break
+            fi
+          done < <(gh api --paginate "repos/$GITHUB_REPOSITORY/releases" \
+            --jq '.[] | select(.draft == false) | .tag_name')
+          if [[ -z "$previous" ]]; then
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            echo "No previous release; binary diff generation is skipped." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "found=true" >> "$GITHUB_OUTPUT"
+            echo "tag=$previous" >> "$GITHUB_OUTPUT"
+            echo "Previous release: $previous" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Generate and verify bsdiff patches
+        if: steps.previous.outputs.found == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PREVIOUS_TAG: ${{ steps.previous.outputs.tag }}
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y bsdiff
+          mkdir -p previous-assets release-output/diff extracted
+          if ! gh release download "$PREVIOUS_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --dir previous-assets \
+              --pattern 'pxml-*.zip' \
+              --pattern 'pxml-*.tar.gz'; then
+            echo "Previous release has no compatible PXML archives; skipping diffs." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          : > release-output/diff-records.tsv
+          safe_previous=$(printf '%s' "$PREVIOUS_TAG" | tr -c 'A-Za-z0-9._-' '_')
+          targets=(
+            windows-x86_64 windows-arm64
+            linux-x86_64 linux-arm64
+            macos-x86_64 macos-arm64
+          )
+          for target in "${targets[@]}"; do
+            if [[ "$target" == windows-* ]]; then extension=.zip; suffix=.exe
+            else extension=.tar.gz; suffix=""; fi
+            archive="previous-assets/pxml-${target}${extension}"
+            if [[ ! -s "$archive" ]]; then
+              echo "::warning::Previous release lacks $archive; skipping $target diff."
+              continue
+            fi
+            root="extracted/$target"
+            rm -rf "$root"
+            mkdir -p "$root"
+            if [[ "$extension" == .zip ]]; then
+              unzip -q "$archive" -d "$root"
+            else
+              tar -xzf "$archive" -C "$root"
+            fi
+            for tool in pxml-expand pxml-opt pxml-compile pxmlc; do
+              binary="${tool}${suffix}"
+              old_binary=$(find "$root" -type f -path "*/bin/$binary" -print -quit)
+              new_binary="release-output/diff-input/$target/$binary"
+              if [[ -z "$old_binary" || ! -s "$old_binary" ]]; then
+                echo "::warning::Previous release lacks $tool for $target; skipping diff."
+                continue
+              fi
+              test -s "$new_binary"
+              patch="release-output/diff/${tool}-${target}.from-${safe_previous}.bsdiff"
+              rebuilt="extracted/${tool}-${target}.rebuilt"
+              bsdiff "$old_binary" "$new_binary" "$patch"
+              bspatch "$old_binary" "$rebuilt" "$patch"
+              cmp "$new_binary" "$rebuilt"
+              printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+                "$tool" "$target" "$(basename "$patch")" \
+                "$(sha256sum "$old_binary" | cut -d' ' -f1)" \
+                "$(sha256sum "$new_binary" | cut -d' ' -f1)" \
+                "$(sha256sum "$patch" | cut -d' ' -f1)" \
+                "$(stat -c%s "$old_binary")" "$(stat -c%s "$new_binary")" "$(stat -c%s "$patch")" \
+                >> release-output/diff-records.tsv
+            done
+          done
+          if [[ -s release-output/diff-records.tsv ]]; then
+            python scripts/make_diff_manifest.py \
+              --records release-output/diff-records.tsv \
+              --previous-tag "$PREVIOUS_TAG" \
+              --target-tag "$RELEASE_TAG" \
+              --output "release-output/diff/pxml-diff-from-${safe_previous}.json"
+          fi
+
+      - name: Generate SHA-256 inventory
+        shell: bash
+        run: |
+          set -euo pipefail
+          : > release-output/SHA256SUMS
+          while IFS= read -r file; do
+            digest=$(sha256sum "$file" | cut -d' ' -f1)
+            printf '%s  %s\n' "$digest" "$(basename "$file")" >> release-output/SHA256SUMS
+          done < <(find release-output/dist release-output/diff -maxdepth 1 -type f 2>/dev/null | sort)
+          test "$(find release-output/dist -maxdepth 1 -name 'pxml-*.*' -type f | wc -l)" -eq 12
+          cat release-output/SHA256SUMS
+
+      - name: Upload assets to existing GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null
+          files=(release-output/dist/* release-output/SHA256SUMS)
+          if compgen -G 'release-output/diff/*' >/dev/null; then
+            files+=(release-output/diff/*)
+          fi
+          gh release upload "$RELEASE_TAG" "${files[@]}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --clobber

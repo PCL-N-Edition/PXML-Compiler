@@ -1,0 +1,13 @@
+<?pxml version="1.0" strict="true"?>
+<Page xmlns="pcl://ui" xmlns:x="urn:pcl:pxml:x" xmlns:local="urn:sample">
+  <x:Const Name="Title" Value="PXML Compiler"/>
+  <local:ActionCard Text="{const Title}">
+    <Button Text="Compile" Command="{cmd Compiler.Build}"/>
+  </local:ActionCard>
+  <x:IfBuild Condition="WINDOWS">
+    <Text Text="Windows build" Foreground="#4A90E2"/>
+    <x:Else>
+      <Text Text="Portable build"/>
+    </x:Else>
+  </x:IfBuild>
+</Page>

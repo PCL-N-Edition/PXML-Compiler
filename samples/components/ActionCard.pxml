@@ -1,0 +1,8 @@
+<?pxml version="1.0"?>
+<x:Component xmlns:x="urn:pcl:pxml:x" x:Name="ActionCard">
+  <x:Property Name="Text" Type="string" Required="true"/>
+  <Column Class="action-card action-card" Padding="12" Gap="8">
+    <Text Text="{component.Text}"/>
+    <x:Content/>
+  </Column>
+</x:Component>

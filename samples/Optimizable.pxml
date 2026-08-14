@@ -1,0 +1,8 @@
+<?pxml version="1.0"?>
+<Page xmlns:x="urn:pcl:pxml:x">
+  <x:Const Name="Greeting" Value="Hello"/>
+  <!-- optimizer removes this comment -->
+  <Column Class="panel panel primary">
+    <Text Text="{const Greeting}"/>
+  </Column>
+</Page>

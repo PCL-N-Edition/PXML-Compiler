@@ -1,0 +1,11 @@
+/build/
+/build-*/
+/out/
+/.vs/
+/CMakeUserPresets.json
+*.pxb
+*.pxir
+*.pxpkg
+*.pxmap
+__pycache__/
+*.pyc

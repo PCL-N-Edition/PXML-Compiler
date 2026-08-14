@@ -1,0 +1,81 @@
+name: CI and deterministic diff
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pxml-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-build:
+    name: ${{ matrix.target }} / ${{ matrix.toolchain }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: windows-x86_64
+            runner: windows-2025
+            toolchain: LLVM Clang
+            compiler: clang
+            lld_arg: --use-lld
+          - target: windows-arm64
+            runner: windows-11-arm
+            toolchain: LLVM Clang
+            compiler: clang
+            lld_arg: --use-lld
+          - target: linux-x86_64
+            runner: ubuntu-24.04
+            toolchain: LLVM Clang
+            compiler: clang-18
+            lld_arg: --use-lld
+          - target: linux-arm64
+            runner: ubuntu-24.04-arm
+            toolchain: LLVM Clang
+            compiler: clang-18
+            lld_arg: --use-lld
+          - target: macos-x86_64
+            runner: macos-15-intel
+            toolchain: Apple Clang
+            compiler: clang
+            lld_arg: ""
+          - target: macos-arm64
+            runner: macos-15
+            toolchain: Apple Clang
+            compiler: clang
+            lld_arg: ""
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install LLVM tools (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-18 lld-18 ninja-build
+
+      - name: Show native toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          uname -a || true
+          "${{ matrix.compiler }}" --version
+          cmake --version
+          ninja --version
+
+      - name: Build, test, and enforce deterministic PXB output
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/build_ci.py \
+            --source . \
+            --work "build/ci-${{ matrix.target }}" \
+            --compiler "${{ matrix.compiler }}" \
+            ${{ matrix.lld_arg }}
