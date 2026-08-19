@@ -17,6 +17,8 @@ static bool run_frontend(
     *document = pxml_parse_text(path, source, source_length, diagnostics);
     if (*document == NULL || pxml_diagnostics_has_errors(diagnostics)) return false;
     memset(&expand_options, 0, sizeof(expand_options));
+    expand_options.predefined_component_directory =
+        options->predefined_component_directory;
     expand_options.components = options->components;
     expand_options.component_count = options->component_count;
     expand_options.imports = options->imports;

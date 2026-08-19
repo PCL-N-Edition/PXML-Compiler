@@ -28,3 +28,5 @@
 - `SMAP`：仅 debug build；`count:u32`，随后每项为 node index、line、column 三个 u32。
 
 空索引用 `0xffffffff`。当前内容指纹覆盖 header 之后的完整目录和 sections，但它不是密码学 hash，也不替代 PXPK 的签名/完整性校验。
+
+`node kind = 5` 是保留的旧值，编译器不得产生它。`Button`、`TextBox` 等框架控件必须先从调用方提供的预定义目录加载对应 PXML Component，并在进入 `NODE` 前完全展开为 Primitive；因此 PXB 中不存在控件 class/node kind。

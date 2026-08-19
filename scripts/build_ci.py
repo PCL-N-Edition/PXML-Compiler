@@ -63,6 +63,8 @@ def main() -> int:
         str(source / "samples" / "Hello.pxml"),
         "--component",
         str(source / "samples" / "components" / "ActionCard.pxml"),
+        "--predefined-dir",
+        str(source / "components" / "predefined"),
         "-D",
         "WINDOWS",
         "--strict",

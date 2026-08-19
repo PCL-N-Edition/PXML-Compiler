@@ -14,6 +14,7 @@ typedef struct PxmlComponentSource {
 } PxmlComponentSource;
 
 typedef struct PxmlExpandOptions {
+    const char *predefined_component_directory;
     const PxmlComponentSource *components;
     size_t component_count;
     const PxmlComponentSource *imports;

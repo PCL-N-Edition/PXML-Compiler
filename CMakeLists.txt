@@ -103,11 +103,14 @@ install(TARGETS
 install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 install(FILES README.md LICENSE DESTINATION .)
 install(DIRECTORY docs/ DESTINATION share/doc/pxml)
+install(DIRECTORY components/predefined/ DESTINATION share/pxml/components)
 
 if(PXML_BUILD_TESTS)
     enable_testing()
     add_executable(pxml_tests tests/test_main.c)
     target_link_libraries(pxml_tests PRIVATE pxml_full)
+    target_compile_definitions(pxml_tests PRIVATE
+        PXML_TEST_PREDEFINED_DIR="${CMAKE_CURRENT_SOURCE_DIR}/components/predefined")
     pxml_configure_target(pxml_tests)
     add_test(NAME pxml_tests COMMAND pxml_tests)
 endif()

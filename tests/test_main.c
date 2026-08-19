@@ -46,6 +46,7 @@ static PxmlCompileOptions sample_options(PxmlComponentSource *component)
     options.strict = true;
     options.components = component;
     options.component_count = 1U;
+    options.predefined_component_directory = PXML_TEST_PREDEFINED_DIR;
     options.build_symbols = symbols;
     options.build_symbol_count = 1U;
     return options;
@@ -85,6 +86,7 @@ static void test_expander_and_optimizer_are_separate(void)
     component.source = component_source;
     component.source_length = sizeof(component_source) - 1U;
     memset(&expand_options, 0, sizeof(expand_options));
+    expand_options.predefined_component_directory = PXML_TEST_PREDEFINED_DIR;
     expand_options.components = &component;
     expand_options.component_count = 1U;
     expand_options.build_symbols = symbols;
@@ -94,7 +96,7 @@ static void test_expander_and_optimizer_are_separate(void)
     memset(&optimize_stats, 0, sizeof(optimize_stats));
     CHECK(document != NULL);
     CHECK(pxml_expand_document(document, &expand_options, &expand_stats, &diagnostics));
-    CHECK(expand_stats.components_expanded == 1U);
+    CHECK(expand_stats.components_expanded == 2U);
     CHECK(expand_stats.slots_materialized == 1U);
     CHECK(expand_stats.build_branches_removed == 1U);
     CHECK(pxml_optimize_document(document, &optimize_options, &optimize_stats, &diagnostics));
@@ -115,6 +117,91 @@ static void test_expander_and_optimizer_are_separate(void)
     CHECK(!pxml_diagnostics_has_errors(&diagnostics));
     free(formatted);
     pxml_document_destroy(document);
+    pxml_diagnostics_destroy(&diagnostics);
+}
+
+static void test_predefined_controls_expand_to_primitives(void)
+{
+    static const char source[] =
+        "<?pxml version=\"1.0\" strict=\"true\"?>\n"
+        "<Page xmlns=\"pcl://ui\" xmlns:x=\"urn:pcl:pxml:x\" xmlns:ui=\"pcl://ui\">\n"
+        "  <ui:Button Text=\"Run\" Command=\"{cmd Launcher.Run}\"/>\n"
+        "  <TextBox Value=\"query\" Placeholder=\"Search\"/>\n"
+        "  <PasswordBox Placeholder=\"Password\"/>\n"
+        "</Page>\n";
+    PxmlDocument *document;
+    PxmlExpandStats stats;
+    PxmlExpandOptions expand_options;
+    PxmlDiagnosticList diagnostics;
+    PxmlBuffer binary = {0};
+    PxmlCompileStats compile_stats;
+    PxmlCompileOptions options;
+    char *formatted;
+    size_t formatted_length = 0U;
+
+    pxml_diagnostics_init(&diagnostics);
+    document = pxml_parse_text("Builtins.pxml", source, sizeof(source) - 1U, &diagnostics);
+    CHECK(document != NULL);
+    memset(&stats, 0, sizeof(stats));
+    memset(&expand_options, 0, sizeof(expand_options));
+    expand_options.predefined_component_directory = PXML_TEST_PREDEFINED_DIR;
+    CHECK(pxml_expand_document(document, &expand_options, &stats, &diagnostics));
+    CHECK(stats.components_expanded == 3U);
+    formatted = NULL;
+    CHECK(pxml_document_format(document, true, &formatted, &formatted_length));
+    CHECK(formatted != NULL && formatted_length != 0U);
+    CHECK(strstr(formatted, "<Button") == NULL);
+    CHECK(strstr(formatted, "<TextBox") == NULL);
+    CHECK(strstr(formatted, "<PasswordBox") == NULL);
+    CHECK(strstr(formatted, "<Node") != NULL);
+    CHECK(strstr(formatted, "<NativeHost") != NULL);
+    free(formatted);
+    pxml_document_destroy(document);
+
+    memset(&options, 0, sizeof(options));
+    options.strict = true;
+    options.release = true;
+    options.profile = PXML_PROFILE_CORE;
+    options.predefined_component_directory = PXML_TEST_PREDEFINED_DIR;
+    memset(&compile_stats, 0, sizeof(compile_stats));
+    CHECK(pxml_compile_text(
+        "Builtins.pxml",
+        source,
+        sizeof(source) - 1U,
+        &options,
+        &binary,
+        &compile_stats,
+        &diagnostics));
+    CHECK(binary.data != NULL && memcmp(binary.data, "PXB1", 4U) == 0);
+    CHECK(compile_stats.expansion.components_expanded == 3U);
+    pxml_buffer_destroy(&binary);
+    pxml_diagnostics_destroy(&diagnostics);
+}
+
+static void test_predefined_control_requires_provided_directory(void)
+{
+    static const char source[] =
+        "<?pxml version=\"1.0\" strict=\"true\"?>\n"
+        "<Page xmlns=\"pcl://ui\"><Button Text=\"Run\"/></Page>\n";
+    PxmlCompileOptions options = pxml_compile_options_default();
+    PxmlCompileStats stats;
+    PxmlDiagnosticList diagnostics;
+    PxmlBuffer binary = {0};
+
+    options.strict = true;
+    memset(&stats, 0, sizeof(stats));
+    pxml_diagnostics_init(&diagnostics);
+    CHECK(!pxml_compile_text(
+        "NoPredefinedDirectory.pxml",
+        source,
+        sizeof(source) - 1U,
+        &options,
+        &binary,
+        &stats,
+        &diagnostics));
+    CHECK(pxml_diagnostics_has_errors(&diagnostics));
+    CHECK(binary.data == NULL && binary.size == 0U);
+    pxml_buffer_destroy(&binary);
     pxml_diagnostics_destroy(&diagnostics);
 }
 
@@ -186,6 +273,7 @@ static void test_compact_ir_round_trip(void)
     component.source = component_source;
     component.source_length = sizeof(component_source) - 1U;
     memset(&expand_options, 0, sizeof(expand_options));
+    expand_options.predefined_component_directory = PXML_TEST_PREDEFINED_DIR;
     expand_options.components = &component;
     expand_options.component_count = 1U;
     expand_options.build_symbols = symbols;
@@ -325,6 +413,8 @@ int main(void)
     test_parser_rejects_dtd();
     test_malformed_xml_is_rejected();
     test_expander_and_optimizer_are_separate();
+    test_predefined_controls_expand_to_primitives();
+    test_predefined_control_requires_provided_directory();
     test_compiler_is_deterministic();
     test_compact_ir_round_trip();
     test_import_expands_registered_module();

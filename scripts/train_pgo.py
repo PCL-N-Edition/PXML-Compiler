@@ -121,6 +121,7 @@ def main() -> int:
             run(
                 [
                     str(executables[0]), str(page), "-o", str(expanded),
+                    "--predefined-dir", str(source / "components" / "predefined"),
                     "--component", str(action_card), "--component", str(frame),
                     "--import", str(templates),
                     "-D", symbol,

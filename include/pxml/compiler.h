@@ -19,6 +19,7 @@ typedef struct PxmlCompileOptions {
     bool release;
     bool strict;
     bool warnings_as_errors;
+    const char *predefined_component_directory;
     const char *const *build_symbols;
     size_t build_symbol_count;
     const PxmlComponentSource *components;

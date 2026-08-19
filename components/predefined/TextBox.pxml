@@ -1,0 +1,14 @@
+<?pxml version="1.0" strict="true"?>
+<x:Component xmlns="pcl://ui" xmlns:x="urn:pcl:pxml:x" x:Name="TextBox">
+  <x:Property Name="Value" Type="string" Default=""/>
+  <x:Property Name="Placeholder" Type="string" Default=""/>
+  <NativeHost
+      Kind="TextBox"
+      Value="{component.Value}"
+      Placeholder="{component.Placeholder}"
+      Height="36"
+      Behaviors="Focusable"
+      AccessibleRole="TextBox"
+      AccessibleName="{component.Placeholder}"
+      AccessibleActions="Focus SetValue"/>
+</x:Component>

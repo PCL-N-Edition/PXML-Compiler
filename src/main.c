@@ -9,6 +9,7 @@ typedef struct CliOptions {
     const char *command;
     const char *input_path;
     const char *output_path;
+    const char *predefined_component_directory;
     const char **component_paths;
     size_t component_count;
     const char **import_paths;
@@ -39,6 +40,7 @@ static void print_usage(FILE *output)
         "  pxmlc dump <input.pxb>\n"
         "\n"
         "Options:\n"
+        "  --predefined-dir <directory>  Resolve <Name> from <directory>/Name.pxml\n"
         "  --component <file>   Register an x:Component source (repeatable)\n"
         "  --import <file>      Register an x:Import source (repeatable)\n"
         "  -D <symbol>          Define an x:IfBuild symbol (repeatable)\n"
@@ -165,6 +167,9 @@ static bool parse_cli(int argc, char **argv, CliOptions *options)
         } else if (strcmp(argument, "--component") == 0) {
             if (++index >= argc) return false;
             options->component_paths[options->component_count++] = argv[index];
+        } else if (strcmp(argument, "--predefined-dir") == 0) {
+            if (++index >= argc || options->predefined_component_directory != NULL) return false;
+            options->predefined_component_directory = argv[index];
         } else if (strcmp(argument, "--import") == 0) {
             if (++index >= argc) return false;
             options->import_paths[options->import_count++] = argv[index];
@@ -250,6 +255,7 @@ static PxmlCompileOptions make_compile_options(
     options.release = cli->release;
     options.strict = cli->strict;
     options.warnings_as_errors = cli->warnings_as_errors;
+    options.predefined_component_directory = cli->predefined_component_directory;
     options.build_symbols = cli->symbols;
     options.build_symbol_count = cli->symbol_count;
     options.components = components->sources;

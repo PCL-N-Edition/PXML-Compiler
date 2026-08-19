@@ -8,13 +8,15 @@ static void usage(void)
 {
     fprintf(stderr,
         "Usage: pxml-expand <input.pxml> -o <expanded.pxml> "
-        "[--component <file>]... [--import <file>]... [-D <symbol>]...\n");
+        "[--predefined-dir <directory>] [--component <file>]... "
+        "[--import <file>]... [-D <symbol>]...\n");
 }
 
 int main(int argc, char **argv)
 {
     const char *input = NULL;
     const char *output = NULL;
+    const char *predefined_component_directory = NULL;
     const char **component_paths;
     const char **import_paths;
     const char **symbols;
@@ -49,6 +51,9 @@ int main(int argc, char **argv)
             output = argv[index];
         } else if (strcmp(argv[index], "--component") == 0 && ++index < argc) {
             component_paths[component_count++] = argv[index];
+        } else if (strcmp(argv[index], "--predefined-dir") == 0 && ++index < argc &&
+                   predefined_component_directory == NULL) {
+            predefined_component_directory = argv[index];
         } else if (strcmp(argv[index], "--import") == 0 && ++index < argc) {
             import_paths[import_count++] = argv[index];
         } else if (strcmp(argv[index], "-D") == 0 && ++index < argc) {
@@ -94,6 +99,7 @@ int main(int argc, char **argv)
     document = pxml_parse_file(input, &diagnostics);
     memset(&options, 0, sizeof(options));
     memset(&stats, 0, sizeof(stats));
+    options.predefined_component_directory = predefined_component_directory;
     options.components = components;
     options.component_count = component_count;
     options.imports = imports;

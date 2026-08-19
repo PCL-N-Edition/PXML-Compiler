@@ -236,7 +236,8 @@ static uint32_t node_kind_id(const char *name)
     if (pxml_string_equal(local, "Column")) return 1U;
     if (pxml_string_equal(local, "Row")) return 2U;
     if (pxml_string_equal(local, "Text")) return 4U;
-    if (pxml_string_equal(local, "Button")) return 5U;
+    /* 5 is reserved by the early prototype. Button is a built-in component and
+       must have been expanded to Node + Text before lowering. */
     if (pxml_string_equal(local, "If")) return 6U;
     if (pxml_string_equal(local, "Grid")) return 7U;
     if (pxml_string_equal(local, "Overlay")) return 8U;

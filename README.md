@@ -3,7 +3,7 @@
 PXML Compiler 是 PXML 1.0 的官方原生 C17 工具链。项目由三个可独立使用的阶段库和程序组成，并提供一个不落盘中间结果的完整驱动器：
 
 ```text
-pxml-expand   PXML + components/build symbols -> expanded PXML
+pxml-expand   PXML + component directories/build symbols -> expanded PXML
 pxml-opt      expanded PXML                  -> compact PXIR
 pxml-compile  optimized PXIR                 -> PXB1
 pxmlc --full  source -> expand -> optimize -> compile（内存内串联）
@@ -43,6 +43,7 @@ Windows/Linux 链接增加 `-fuse-ld=lld`。官方矩阵为 Windows、Linux、ma
 
 ```bash
 pxml-expand samples/Hello.pxml -o Hello.expanded.pxml \
+  --predefined-dir components/predefined \
   --component samples/components/ActionCard.pxml -D WINDOWS
 
 pxml-opt Hello.expanded.pxml -o Hello.pxir
@@ -50,6 +51,7 @@ pxml-compile Hello.pxir -o Hello.pxb --strict
 
 # 常规 IDE/构建路径：中间表示不落盘
 pxmlc --full samples/Hello.pxml -o Hello.pxb \
+  --predefined-dir components/predefined \
   --component samples/components/ActionCard.pxml -D WINDOWS --strict --release
 
 pxmlc inspect Hello.pxb
@@ -57,6 +59,8 @@ pxmlc dump Hello.pxb
 ```
 
 公开静态库为 `libpxml_core`、`libpxml_expand`、`libpxml_opt`、`libpxml_compile` 与 `libpxml_full`。
+
+`--predefined-dir` 是框架控件目录。展开器遇到非 Primitive 的 `<Button>`、`<TextBox>` 等元素时，按名称读取 `Button.pxml`、`TextBox.pxml`，然后执行普通 Component 展开。控件定义不编译进展开器；Release 将默认定义安装到 `share/pxml/components`。显式 `--component` 继续用于项目私有组件，且重名定义会被拒绝。
 
 ## PGO
 

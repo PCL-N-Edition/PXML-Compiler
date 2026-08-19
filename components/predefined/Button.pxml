@@ -1,0 +1,13 @@
+<?pxml version="1.0" strict="true"?>
+<x:Component xmlns="pcl://ui" xmlns:x="urn:pcl:pxml:x" x:Name="Button">
+  <x:Property Name="Text" Type="string" Default=""/>
+  <x:Property Name="Command" Type="command?" Default="{cmd None}"/>
+  <Node
+      Class="Button"
+      Behaviors="Hoverable Pressable Clickable Focusable"
+      Command="{component.Command}"
+      AccessibleRole="Button"
+      AccessibleActions="Invoke Focus">
+    <Text Text="{component.Text}"/>
+  </Node>
+</x:Component>

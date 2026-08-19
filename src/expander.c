@@ -1,5 +1,6 @@
 #include "pxml_internal.h"
 
+#include <ctype.h>
 #include <stdio.h>
 
 typedef struct NodeVector {
@@ -23,6 +24,7 @@ typedef struct ExpandContext {
     PxmlDocument *target;
     ComponentDefinition *components;
     size_t component_count;
+    size_t component_capacity;
     PxmlDocument **imports;
     size_t import_count;
     const PxmlExpandOptions *options;
@@ -125,6 +127,192 @@ static const ComponentDefinition *find_component(
         }
     }
     return NULL;
+}
+
+static bool is_primitive_name(const char *qualified_name)
+{
+    const char *local = pxml_local_name(qualified_name);
+    static const char *const primitives[] = {
+        "Page", "Node", "Content", "Text", "Image", "Row", "Column",
+        "Grid", "Overlay", "Absolute", "Scroll", "VirtualList", "NativeHost"
+    };
+    size_t index;
+    for (index = 0U; index < sizeof(primitives) / sizeof(primitives[0]); ++index) {
+        if (pxml_string_equal(local, primitives[index])) return true;
+    }
+    return false;
+}
+
+static bool is_language_directive_name(const char *qualified_name)
+{
+    const char *separator = strchr(qualified_name, ':');
+    const char *local_name = pxml_local_name(qualified_name);
+    static const char *const directives[] = {
+        "Component", "Property", "Slot", "Into", "Content", "Const", "IfBuild",
+        "Else", "Import", "Module", "Template", "If", "Switch", "Case", "Default", "For"
+    };
+    size_t index;
+    if (separator != NULL && separator == qualified_name + 1 && qualified_name[0] == 'x') {
+        return true;
+    }
+    for (index = 0U; index < sizeof(directives) / sizeof(directives[0]); ++index) {
+        if (pxml_string_equal(local_name, directives[index])) return true;
+    }
+    return false;
+}
+
+static bool is_safe_component_file_name(const char *name)
+{
+    const unsigned char *cursor = (const unsigned char *)name;
+    if (*cursor == '\0') return false;
+    while (*cursor != '\0') {
+        if (!(isalnum(*cursor) != 0 || *cursor == '_' || *cursor == '-')) return false;
+        ++cursor;
+    }
+    return true;
+}
+
+static bool add_component_document(
+    ExpandContext *context,
+    PxmlDocument *document,
+    const char *path,
+    const char *expected_name)
+{
+    const PxmlAttribute *name;
+    size_t index;
+    if (document == NULL || document->root == NULL ||
+        !pxml_string_equal(pxml_local_name(document->root->name), "Component")) {
+        if (document != NULL) {
+            pxml_add_diagnostic(
+                context->diagnostics,
+                "PXML4205",
+                PXML_DIAGNOSTIC_ERROR,
+                path,
+                document->root == NULL
+                    ? (PxmlSourceSpan){0U, 0U, 1U, 1U}
+                    : document->root->span,
+                "component source root must be <Component>");
+        }
+        pxml_document_destroy(document);
+        return false;
+    }
+    name = pxml_node_find_attribute(document->root, "x:Name");
+    if (name == NULL || name->value[0] == '\0') {
+        pxml_add_diagnostic(
+            context->diagnostics,
+            "PXML4206",
+            PXML_DIAGNOSTIC_ERROR,
+            path,
+            document->root->span,
+            "component root requires x:Name");
+        pxml_document_destroy(document);
+        return false;
+    }
+    if (expected_name != NULL && !pxml_string_equal(name->value, expected_name)) {
+        pxml_add_diagnostic(
+            context->diagnostics,
+            "PXML4209",
+            PXML_DIAGNOSTIC_ERROR,
+            path,
+            document->root->span,
+            "predefined component file '%s.pxml' declares x:Name '%s'",
+            expected_name,
+            name->value);
+        pxml_document_destroy(document);
+        return false;
+    }
+    for (index = 0U; index < context->component_count; ++index) {
+        if (pxml_string_equal(context->components[index].name, name->value)) {
+            pxml_add_diagnostic(
+                context->diagnostics,
+                "PXML4208",
+                PXML_DIAGNOSTIC_ERROR,
+                path,
+                document->root->span,
+                "component '%s' is already defined",
+                name->value);
+            pxml_document_destroy(document);
+            return false;
+        }
+    }
+    if (!pxml_reserve_array(
+            (void **)&context->components,
+            &context->component_capacity,
+            context->component_count + 1U,
+            sizeof(ComponentDefinition))) {
+        pxml_document_destroy(document);
+        return false;
+    }
+    context->components[context->component_count].document = document;
+    context->components[context->component_count].name = name->value;
+    context->component_count++;
+    return true;
+}
+
+static const ComponentDefinition *resolve_predefined_component(
+    ExpandContext *context,
+    const PxmlNode *invocation)
+{
+    const char *directory = context->options->predefined_component_directory;
+    const char *name = pxml_local_name(invocation->name);
+    size_t directory_length;
+    size_t name_length;
+    size_t path_length;
+    char *path;
+    FILE *probe;
+    PxmlDocument *document;
+    const ComponentDefinition *resolved;
+    if (directory == NULL || directory[0] == '\0' || is_primitive_name(invocation->name) ||
+        is_language_directive_name(invocation->name)) {
+        return NULL;
+    }
+    if (!is_safe_component_file_name(name)) {
+        pxml_add_diagnostic(
+            context->diagnostics,
+            "PXML4210",
+            PXML_DIAGNOSTIC_ERROR,
+            context->target->path,
+            invocation->span,
+            "component name '%s' cannot be resolved as a predefined component file",
+            name);
+        return NULL;
+    }
+    directory_length = strlen(directory);
+    name_length = strlen(name);
+    if (directory_length > SIZE_MAX - name_length - 7U) return NULL;
+    path_length = directory_length + 1U + name_length + 5U;
+    path = (char *)malloc(path_length + 1U);
+    if (path == NULL) return NULL;
+    memcpy(path, directory, directory_length);
+    if (directory_length != 0U && directory[directory_length - 1U] != '/' &&
+        directory[directory_length - 1U] != '\\') {
+        path[directory_length++] = '/';
+    }
+    memcpy(path + directory_length, name, name_length);
+    memcpy(path + directory_length + name_length, ".pxml", 6U);
+    probe = fopen(path, "rb");
+    if (probe == NULL) {
+        pxml_add_diagnostic(
+            context->diagnostics,
+            "PXML4211",
+            PXML_DIAGNOSTIC_ERROR,
+            context->target->path,
+            invocation->span,
+            "predefined component '%s' was not found at '%s'",
+            name,
+            path);
+        free(path);
+        return NULL;
+    }
+    (void)fclose(probe);
+    document = pxml_parse_file(path, context->diagnostics);
+    if (!add_component_document(context, document, path, name)) {
+        free(path);
+        return NULL;
+    }
+    free(path);
+    resolved = find_component(context, invocation->name);
+    return resolved;
 }
 
 static const PxmlNode *find_property_declaration(
@@ -593,6 +781,8 @@ static bool expand_node(
         return expand_import(context, source, output, depth);
     }
     component = find_component(context, source->name);
+    if (component == NULL) component = resolve_predefined_component(context, source);
+    if (pxml_diagnostics_has_errors(context->diagnostics)) return false;
     if (component != NULL) {
         return expand_component(context, component, source, output, depth);
     }
@@ -646,55 +836,17 @@ static bool expand_node(
 static bool load_components(ExpandContext *context)
 {
     size_t index;
-    if (context->options->component_count == 0U) {
-        return true;
-    }
-    context->components = (ComponentDefinition *)calloc(
-        context->options->component_count,
-        sizeof(ComponentDefinition));
-    if (context->components == NULL) {
-        return false;
-    }
     for (index = 0U; index < context->options->component_count; ++index) {
         const PxmlComponentSource *source = &context->options->components[index];
         size_t length = source->source_length == 0U
             ? strlen(source->source)
             : source->source_length;
-        const PxmlAttribute *name;
         PxmlDocument *document = pxml_parse_text(
             source->path,
             source->source,
             length,
             context->diagnostics);
-        if (document == NULL || document->root == NULL ||
-            !pxml_string_equal(pxml_local_name(document->root->name), "Component")) {
-            if (document != NULL) {
-                pxml_add_diagnostic(
-                    context->diagnostics,
-                    "PXML4205",
-                    PXML_DIAGNOSTIC_ERROR,
-                    source->path,
-                    document->root == NULL ? (PxmlSourceSpan){0U, 0U, 1U, 1U} : document->root->span,
-                    "component source root must be <Component>");
-            }
-            pxml_document_destroy(document);
-            return false;
-        }
-        name = pxml_node_find_attribute(document->root, "x:Name");
-        if (name == NULL || name->value[0] == '\0') {
-            pxml_add_diagnostic(
-                context->diagnostics,
-                "PXML4206",
-                PXML_DIAGNOSTIC_ERROR,
-                source->path,
-                document->root->span,
-                "component root requires x:Name");
-            pxml_document_destroy(document);
-            return false;
-        }
-        context->components[context->component_count].document = document;
-        context->components[context->component_count].name = name->value;
-        context->component_count++;
+        if (!add_component_document(context, document, source->path, NULL)) return false;
     }
     return true;
 }
@@ -728,6 +880,7 @@ static void destroy_components(ExpandContext *context)
     free(context->components);
     context->components = NULL;
     context->component_count = 0U;
+    context->component_capacity = 0U;
 }
 
 static void destroy_imports(ExpandContext *context)

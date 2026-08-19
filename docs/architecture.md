@@ -6,7 +6,7 @@
 source buffer
     -> on-demand lexer / zero-copy token views
     -> arena-backed syntax tree
-    -> component / slot / build-condition expansion
+    -> predefined-directory lookup + component / slot / build-condition expansion
     -> compact PXIR (uint32 IDs, interned strings, contiguous arrays)
     -> fused linear optimizer
     -> typed blueprint lowering
@@ -22,6 +22,8 @@ source buffer
 - `libpxml_full` / `pxmlc --full` 在一个进程内串联三阶段，不序列化、重读或落盘中间结果。
 
 独立 CLI 用于诊断、测试与 PGO；正常 IDE/build integration 应优先使用 `pxmlc --full` 或 `libpxml_full`。
+
+框架控件不硬编码在展开器中。调用方通过 `predefined_component_directory` / `--predefined-dir` 提供目录；非 Primitive 元素按安全的本地名称映射到 `<directory>/<Name>.pxml`。文件仍走唯一的 Parser、Component property/slot substitution 和递归展开路径，文件名与 `x:Name` 必须一致。由此新增控件只修改 PXML 定义，不修改或重编译 expander。
 
 ## Arena 与所有权
 
